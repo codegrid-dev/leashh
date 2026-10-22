@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { validateProfile } from "@/app/lib/profile";
 
 export const runtime = "nodejs";
@@ -7,16 +8,16 @@ export const runtime = "nodejs";
 // Step 3. "Save progress on this step too, so a long form is not lost to a
 // dropped connection." Writing the profile does not consent to anything: the
 // record stays 'verified' until step 4 is submitted.
-export async function POST(request) {
+async function handler(request) {
   const body = await request.json().catch(() => ({}));
   const { applicantId } = body;
   if (!applicantId) return NextResponse.json({ error: "Missing application" }, { status: 400 });
 
-  const { data: a } = await db()
+  const a = await must(db()
     .from("applicants")
     .select("id, status")
     .eq("id", applicantId)
-    .maybeSingle();
+    .maybeSingle(), "load the application");
   if (!a) return NextResponse.json({ error: "Missing application" }, { status: 404 });
   if (a.status === "pending_verification") {
     return NextResponse.json({ error: "Confirm your email first" }, { status: 409 });
@@ -25,7 +26,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Already submitted" }, { status: 409 });
   }
 
-  const { data: catalogue } = await db().from("services").select("key");
+  const catalogue = await must(db().from("services").select("key"), "load the service list");
   const keys = (catalogue || []).map((s) => s.key);
 
   const { errors, value } = validateProfile(body, keys);
@@ -59,3 +60,5 @@ export async function POST(request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withDb(handler);

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { verifyCode, MAX_ATTEMPTS } from "@/app/lib/codes";
 
 export const runtime = "nodejs";
@@ -8,19 +9,19 @@ export const runtime = "nodejs";
 // "On success set the record to verified and stamp the time."
 //
 // Verified is not consented. The consent gate is two steps away.
-export async function POST(request) {
+async function handler(request) {
   const { applicantId, code } = await request.json().catch(() => ({}));
   if (!applicantId || !/^\d{6}$/.test(String(code || ""))) {
     return NextResponse.json({ error: "Enter the six digit code" }, { status: 400 });
   }
 
-  const { data: row } = await db()
+  const row = await must(db()
     .from("verification_codes")
     .select("id, code_hash, expires_at, attempts")
     .eq("applicant_id", applicantId)
     .is("consumed_at", null)
     .is("invalidated_at", null)
-    .maybeSingle();
+    .maybeSingle(), "load the verification code");
 
   if (!row) {
     return NextResponse.json({ error: "That code has expired. Send a new one." }, { status: 410 });
@@ -61,3 +62,5 @@ export async function POST(request) {
 
   return NextResponse.json({ ok: true, status: "verified" });
 }
+
+export const POST = withDb(handler);

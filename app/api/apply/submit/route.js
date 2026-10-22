@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { MANDATORY, OPTIONAL, reference } from "@/app/lib/declarations";
 import { clientIp } from "@/app/lib/guard";
 import { sendConfirmation } from "@/app/lib/mail";
@@ -8,16 +9,16 @@ export const runtime = "nodejs";
 
 // Step 4. "Only on submit does the record become eligible for transfer. Set a
 // distinct status such as consented and make that the gate on the export."
-export async function POST(request) {
+async function handler(request) {
   const body = await request.json().catch(() => ({}));
   const { applicantId, accepted } = body;
   if (!applicantId) return NextResponse.json({ error: "Missing application" }, { status: 400 });
 
-  const { data: a } = await db()
+  const a = await must(db()
     .from("applicants")
     .select("id, status, first_name, email, postcode, travel_miles, reference")
     .eq("id", applicantId)
-    .maybeSingle();
+    .maybeSingle(), "load the application");
   if (!a) return NextResponse.json({ error: "Missing application" }, { status: 404 });
   if (a.status === "pending_verification") {
     return NextResponse.json({ error: "Confirm your email first" }, { status: 409 });
@@ -50,10 +51,10 @@ export async function POST(request) {
 
   // Current version of each wording, so the stored agreement resolves back to
   // the exact text that was on screen.
-  const { data: texts } = await db()
+  const texts = await must(db()
     .from("declaration_texts")
     .select("key, version")
-    .in("key", [...MANDATORY, ...OPTIONAL]);
+    .in("key", [...MANDATORY, ...OPTIONAL]), "load the declaration wording");
   const latest = new Map();
   for (const t of texts || []) {
     if (!latest.has(t.key) || t.version > latest.get(t.key)) latest.set(t.key, t.version);
@@ -96,3 +97,5 @@ export async function POST(request) {
 
   return NextResponse.json({ ok: true, reference: ref });
 }
+
+export const POST = withDb(handler);

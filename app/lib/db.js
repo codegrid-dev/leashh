@@ -30,3 +30,30 @@ export function db() {
   });
   return client;
 }
+
+// Supabase returns errors in the result rather than throwing, so a destructured
+// `{ data }` silently becomes null when the database is unreachable. Every
+// route then read that null as "not found" and answered 404 "Missing
+// application", blaming the applicant for our outage. That is how a three week
+// pause looked like a disabled form instead of something obviously broken.
+//
+// must() makes a failure loud. Wrap the handler in withDb() to turn it into an
+// honest 503.
+export class DbUnavailable extends Error {
+  constructor(what, cause) {
+    super(`database unavailable while trying to ${what}`);
+    this.name = "DbUnavailable";
+    this.cause = cause;
+  }
+}
+
+export async function must(query, what) {
+  let result;
+  try {
+    result = await query;
+  } catch (e) {
+    throw new DbUnavailable(what, e);          // network level failure
+  }
+  if (result?.error) throw new DbUnavailable(what, result.error);
+  return result?.data;
+}

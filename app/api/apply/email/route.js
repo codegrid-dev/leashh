@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { RX, cleanEmail } from "@/app/lib/validate";
 import { issueCode } from "@/app/lib/issueCode";
 import { sendAlreadyApplied } from "@/app/lib/mail";
@@ -14,7 +15,7 @@ export const runtime = "nodejs";
 // address that already finished is parked on this screen with no back button,
 // so this is their only exit. There, changing the address is not editing the
 // finished application, it is starting a new one.
-export async function POST(request) {
+async function handler(request) {
   const body = await request.json().catch(() => ({}));
   const applicantId = body.applicantId;
   const email = cleanEmail(body.email);
@@ -24,19 +25,22 @@ export async function POST(request) {
     return NextResponse.json({ errors: { email: "Please enter a valid email address" } }, { status: 422 });
   }
 
-  const { data: a } = await db()
+  const a = await must(db()
     .from("applicants")
     .select("id, first_name, last_name, mobile, email, status")
     .eq("id", applicantId)
-    .maybeSingle();
+    .maybeSingle(), "load the application");
   if (!a) return NextResponse.json({ error: "Missing application" }, { status: 404 });
 
   // Whatever is already on the new address decides what happens next.
-  const { data: target } = email === a.email ? { data: a } : await db()
-    .from("applicants")
-    .select("id, first_name, status, reference")
-    .eq("email", email)
-    .maybeSingle();
+  const target = email === a.email ? a : await must(
+    db()
+      .from("applicants")
+      .select("id, first_name, status, reference")
+      .eq("email", email)
+      .maybeSingle(),
+    "look up the new address"
+  );
 
   // The new address has already completed. Same reasoning as /start: the
   // response must not reveal that, so the inbox is told instead.
@@ -92,3 +96,5 @@ export async function POST(request) {
   await issueCode(applicantId, email, a.first_name);
   return NextResponse.json({ ok: true, applicantId });
 }
+
+export const POST = withDb(handler);

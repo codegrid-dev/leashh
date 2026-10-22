@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { validateDetails } from "@/app/lib/validate";
 import { clientIp, ipIsOverLimit, turnstileOk } from "@/app/lib/guard";
 import { issueCode } from "@/app/lib/issueCode";
@@ -12,7 +13,7 @@ export const runtime = "nodejs";
 //
 // "A duplicate email resumes the existing record and re-sends a code rather
 // than creating a second one."
-export async function POST(request) {
+async function handler(request) {
   const body = await request.json().catch(() => ({}));
 
   // honeypot: a real person never fills this
@@ -26,11 +27,11 @@ export async function POST(request) {
   const { errors, value } = validateDetails(body);
   if (Object.keys(errors).length) return NextResponse.json({ errors }, { status: 422 });
 
-  const { data: existing } = await db()
+  const existing = await must(db()
     .from("applicants")
     .select("id, status, first_name, reference")
     .eq("email", value.email)
-    .maybeSingle();
+    .maybeSingle(), "look up the address");
 
   // Already finished. The response is deliberately identical to a new
   // application so nobody can use this endpoint to discover who has applied.
@@ -75,3 +76,5 @@ export async function POST(request) {
   await issueCode(applicantId, value.email, value.firstName);
   return NextResponse.json({ applicantId, resumed: Boolean(existing) });
 }
+
+export const POST = withDb(handler);

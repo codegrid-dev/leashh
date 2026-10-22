@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/app/lib/db";
+import { db, must } from "@/app/lib/db";
+import { withDb } from "@/app/lib/route";
 import { sendIsOverLimit } from "@/app/lib/guard";
 import { sendAlreadyApplied } from "@/app/lib/mail";
 import { issueCode } from "@/app/lib/issueCode";
@@ -7,15 +8,15 @@ import { issueCode } from "@/app/lib/issueCode";
 export const runtime = "nodejs";
 
 // "send a new code". Rate limited, and it invalidates whatever was live.
-export async function POST(request) {
+async function handler(request) {
   const { applicantId } = await request.json().catch(() => ({}));
   if (!applicantId) return NextResponse.json({ error: "Missing application" }, { status: 400 });
 
-  const { data: a } = await db()
+  const a = await must(db()
     .from("applicants")
     .select("id, email, first_name, status, reference")
     .eq("id", applicantId)
-    .maybeSingle();
+    .maybeSingle(), "load the application");
   if (!a) return NextResponse.json({ error: "Missing application" }, { status: 404 });
   // Same reasoning as start: identical response, explanation by email.
   if (a.status === "consented") {
@@ -34,3 +35,5 @@ export async function POST(request) {
   await issueCode(a.id, a.email, a.first_name);
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withDb(handler);
